@@ -30,6 +30,9 @@ jobs:
       ENABLE_RSS_FETCH: ${{ secrets.ENABLE_RSS_FETCH }}
       ENABLE_TOPIC_DATA_FETCH: ${{ secrets.ENABLE_TOPIC_DATA_FETCH }}
       HEALTH_PORT: ${{ secrets.HEALTH_PORT }}
+      # 点赞配置
+      LIKE_PROBABILITY: ${{ secrets.LIKE_PROBABILITY }}
+      LIKE_LIMIT: ${{ secrets.LIKE_LIMIT }}
       # 代理配置
       PROXY_URL: ${{ secrets.PROXY_URL }}
       PROXY_TYPE: ${{ secrets.PROXY_TYPE }}

@@ -29,7 +29,14 @@
   ];
   const commentLimit = 1000;
   const topicListLimit = 100;
-  const likeLimit = 50;
+
+  // 从localStorage读取可配置的点赞参数（由bypasscf.js注入）
+  const likeLimit = parseInt(localStorage.getItem("likeLimit") || "100", 10); // 每日点赞上限，默认100
+  const likeProbability = parseInt(localStorage.getItem("likeProbability") || "50", 10) / 100; // 点赞概率，默认50%
+  const runTimeMinutes = parseInt(localStorage.getItem("runTimeMinutes") || "20", 10); // 运行时间，默认20分钟
+
+  console.log(`点赞配置加载: 概率=${likeProbability * 100}%, 上限=${likeLimit}次, 运行时间=${runTimeMinutes}分钟`);
+
   // 获取当前页面的URL
   const currentURL = window.location.href;
 
@@ -194,7 +201,7 @@
   const defaultTimestamp = new Date("1999-01-01T00:00:00Z").getTime(); //默认值为1999年
   const storedTime = parseInt(
     localStorage.getItem("clickCounterTimestamp") ||
-      defaultTimestamp.toString(),
+    defaultTimestamp.toString(),
     10
   );
 
@@ -219,7 +226,7 @@
   }
 
   function autoLike() {
-    console.log(`Initial clickCounter: ${clickCounter}`);
+    console.log(`Initial clickCounter: ${clickCounter}, likeLimit: ${likeLimit}`);
     // 寻找所有的discourse-reactions-reaction-button
     const buttons = document.querySelectorAll(
       ".discourse-reactions-reaction-button"
@@ -232,42 +239,69 @@
     }
     console.log(`Found ${buttons.length} buttons.`); // 调试信息
 
+    // 筛选出可点赞的按钮
+    const likeableButtons = Array.from(buttons).filter(
+      (button) =>
+        (button.title === "点赞此帖子" || button.title === "Like this post") &&
+        clickCounter < likeLimit
+    );
+
+    if (likeableButtons.length === 0) {
+      console.log("没有可点赞的按钮或已达到点赞上限");
+      return;
+    }
+
+    // 计算剩余可点赞次数和剩余时间
+    const remainingLikes = likeLimit - clickCounter;
+    const runTimeMs = runTimeMinutes * 60 * 1000;
+
+    // 计算每次点赞的基础间隔，确保在运行时间内均匀分布点赞
+    // 预留20%的时间作为缓冲
+    const baseIntervalMs = Math.floor((runTimeMs * 0.8) / Math.max(remainingLikes, 1));
+    // 最小间隔2秒，最大间隔30秒
+    const minInterval = 2000;
+    const maxInterval = Math.max(minInterval, Math.min(baseIntervalMs, 30000));
+
+    console.log(`点赞时间分配: 剩余${remainingLikes}次, 基础间隔${Math.floor(maxInterval / 1000)}秒`);
+
+    let likeIndex = 0;
     // 逐个点击找到的按钮
-    buttons.forEach((button, index) => {
-      if (
-        (button.title !== "点赞此帖子" && button.title !== "Like this post") ||
-        clickCounter >= likeLimit
-      ) {
-        return;
-      }
-
-      // 新增：点赞前加一个随机概率判断（如30%概率）
-      const likeProbability = 0.3; // 0~1之间，0.3表示30%概率
+    likeableButtons.forEach((button) => {
+      // 使用可配置的概率判断
       if (Math.random() > likeProbability) {
-        console.log(`跳过第${index + 1}个按钮（未通过概率判断）`);
+        console.log(`跳过按钮（概率${likeProbability * 100}%未命中）`);
         return;
       }
 
-      // 点赞间隔时间也随机（2~5秒之间）
-      const randomDelay = 2000 + Math.floor(Math.random() * 3000);
+      // 计算点赞延迟：基于时间分配 + 随机波动（±30%）
+      const randomFactor = 0.7 + Math.random() * 0.6; // 0.7 ~ 1.3
+      const calculatedDelay = Math.floor(maxInterval * randomFactor);
+      const finalDelay = Math.max(minInterval, calculatedDelay);
 
       autoLikeInterval = setTimeout(() => {
+        // 再次检查是否已达到上限
+        if (clickCounter >= likeLimit) {
+          console.log("已达到点赞上限，停止点赞");
+          return;
+        }
         // 模拟点击
         triggerClick(button); // 使用自定义的触发点击方法
-        console.log(`Clicked like button ${index + 1}`);
+        console.log(`Clicked like button, delay: ${Math.floor(finalDelay / 1000)}s`);
         clickCounter++; // 更新点击计数器
         // 将新的点击计数存储到localStorage
         localStorage.setItem("clickCounter", clickCounter.toString());
         // 如果点击次数达到likeLimit次，则设置点赞变量为false
-        if (clickCounter === likeLimit) {
+        if (clickCounter >= likeLimit) {
           console.log(
             `Reached ${likeLimit} likes, setting the like variable to false.`
           );
           localStorage.setItem("autoLikeEnabled", "false"); // 使用localStorage存储点赞变量状态
         } else {
-          console.log("clickCounter:", clickCounter);
+          console.log(`clickCounter: ${clickCounter}/${likeLimit}`);
         }
-      }, index * randomDelay); // 每次点赞的延迟为随机值
+      }, likeIndex * finalDelay); // 每次点赞的延迟递增
+
+      likeIndex++;
     });
   }
   const button = document.createElement("button");

@@ -87,17 +87,19 @@ const delayBetweenBatches =
   runTimeLimitMillis / Math.ceil(totalAccounts / maxConcurrentAccounts);
 const isLikeSpecificUser = process.env.LIKE_SPECIFIC_USER || "false";
 const isAutoLike = process.env.AUTO_LIKE || "true";
+const likeProbability = parseInt(process.env.LIKE_PROBABILITY) || 50; // 点赞概率，默认50%
+const likeLimit = parseInt(process.env.LIKE_LIMIT) || 100; // 每日点赞上限，默认100次
 const enableRssFetch = (process.env.ENABLE_RSS_FETCH || "false") === "true"; // 是否开启抓取RSS，没有设置时默认为false
 const enableTopicDataFetch = (process.env.ENABLE_TOPIC_DATA_FETCH || "false") === "true"; // 是否开启抓取话题数据，没有设置时默认为false
 
+console.log(`点赞配置: 概率=${likeProbability}%, 每日上限=${likeLimit}次, 运行时间=${runTimeLimitMinutes}分钟`);
+
 console.log(
-  `RSS抓取功能状态: ${enableRssFetch ? "开启" : "关闭"} (ENABLE_RSS_FETCH=${
-    process.env.ENABLE_RSS_FETCH
+  `RSS抓取功能状态: ${enableRssFetch ? "开启" : "关闭"} (ENABLE_RSS_FETCH=${process.env.ENABLE_RSS_FETCH
   })`
 );
 console.log(
-  `话题数据抓取功能状态: ${
-    enableTopicDataFetch ? "开启" : "关闭"
+  `话题数据抓取功能状态: ${enableTopicDataFetch ? "开启" : "关闭"
   } (ENABLE_TOPIC_DATA_FETCH=${process.env.ENABLE_TOPIC_DATA_FETCH})`
 );
 
@@ -139,8 +141,7 @@ async function tgSendWithRetry(id, message, maxRetries = 3) {
       lastErr = e;
       const delay = 1500 * (i + 1);
       console.error(
-        `Telegram send failed (attempt ${i + 1}/${maxRetries}): ${
-          e && e.message ? e.message : e
+        `Telegram send failed (attempt ${i + 1}/${maxRetries}): ${e && e.message ? e.message : e
         }`
       );
       await new Promise((r) => setTimeout(r, delay));
@@ -253,8 +254,7 @@ function delayClick(time) {
         console.log("没有下一个批次，即将结束");
       }
       console.log(
-        `批次 ${
-          Math.floor(i / maxConcurrentAccounts) + 1
+        `批次 ${Math.floor(i / maxConcurrentAccounts) + 1
         } 完成，关闭浏览器...,浏览器对象：${browsers}`
       );
       // 关闭所有浏览器实例
@@ -361,8 +361,7 @@ async function launchBrowserForUser(username, password) {
             }
           } catch (e2) {
             console.warn(
-              `Skip disabling autoLike due to closed target: ${
-                (e2 && e2.message) ? e2.message : e2
+              `Skip disabling autoLike due to closed target: ${(e2 && e2.message) ? e2.message : e2
               }`
             );
           }
@@ -415,17 +414,24 @@ async function launchBrowserForUser(username, password) {
     // 在每个新的文档加载时执行外部脚本
     await page.evaluateOnNewDocument(
       (...args) => {
-        const [specificUser, scriptToEval, isAutoLike] = args;
+        const [specificUser, scriptToEval, isAutoLike, likeProbability, likeLimit, runTimeMinutes] = args;
         localStorage.setItem("read", true);
         localStorage.setItem("specificUser", specificUser);
         localStorage.setItem("isFirstRun", "false");
         localStorage.setItem("autoLikeEnabled", isAutoLike);
+        localStorage.setItem("likeProbability", likeProbability.toString());
+        localStorage.setItem("likeLimit", likeLimit.toString());
+        localStorage.setItem("runTimeMinutes", runTimeMinutes.toString());
         console.log("当前点赞用户：", specificUser);
+        console.log(`点赞配置: 概率=${likeProbability}%, 上限=${likeLimit}次, 运行时间=${runTimeMinutes}分钟`);
         eval(scriptToEval);
       },
       specificUser,
       externalScript,
-      isAutoLike
+      isAutoLike,
+      likeProbability,
+      likeLimit,
+      runTimeLimitMinutes
     ); //变量必须从外部显示的传入, 因为在浏览器上下文它是读取不了的
     // 添加一个监听器来监听每次页面加载完成的事件
     page.on("load", async () => {
@@ -451,19 +457,25 @@ async function launchBrowserForUser(username, password) {
     // Ensure automation injected after navigation (fallback in case init-script failed)
     try {
       await page.evaluate(
-        (specificUser, scriptToEval, isAutoLike) => {
+        (specificUser, scriptToEval, isAutoLike, likeProbability, likeLimit, runTimeMinutes) => {
           if (!window.__autoInjected) {
             localStorage.setItem("read", true);
             localStorage.setItem("specificUser", specificUser);
             localStorage.setItem("isFirstRun", "false");
             localStorage.setItem("autoLikeEnabled", isAutoLike);
+            localStorage.setItem("likeProbability", likeProbability.toString());
+            localStorage.setItem("likeLimit", likeLimit.toString());
+            localStorage.setItem("runTimeMinutes", runTimeMinutes.toString());
             try { eval(scriptToEval); } catch (e) { console.error("eval external script failed", e); }
             window.__autoInjected = true;
           }
         },
         specificUser,
         externalScript,
-        isAutoLike
+        isAutoLike,
+        likeProbability,
+        likeLimit,
+        runTimeLimitMinutes
       );
     } catch (e) {
       console.warn(`Post-navigation inject failed: ${e && e.message ? e.message : e}`);
@@ -644,7 +656,7 @@ async function navigatePage(url, page, browser) {
     page.setDefaultNavigationTimeout(
       parseInt(process.env.NAV_TIMEOUT_MS || process.env.NAV_TIMEOUT || "120000", 10)
     );
-  } catch {}
+  } catch { }
   await page.goto(url, { waitUntil: "domcontentloaded" }); //如果使用默认的load,linux下页面会一直加载导致无法继续执行
 
   const startTime = Date.now(); // 记录开始时间
